@@ -23,6 +23,8 @@ HA_BASE_URL = "http://127.0.0.1:8123"
 HA_API_KEY = None
 LISTEN_IP = "192.168.10.250"
 HTTP_LISTEN_PORT = 8000
+# Note: For Sleep Cycle to work, HTTP_LISTEN_PORT must be set to 80
+# (which might conflict with a normal web server)
 
 #
 # Home Assistant API Usage
@@ -80,8 +82,8 @@ class HomeAssistant:
                 # Filter the friendly entity name so that it only contains letters and spaces
                 new_entity_name = re.sub("[^\w\ ]+", "", new_entity_name, re.U)
 
-                # Really dumb way of creating stable unique_ids
-                unique_id = zlib.crc32(state['entity_id'].encode('utf-8'))
+                # Really dumb way of creating stable unique_ids. Make sure they are positive.
+                unique_id = zlib.crc32(state['entity_id'].encode('utf-8')) & 0xffffffff
 
                 self.entities[unique_id] = {}
                 self.entities[unique_id]['name'] = new_entity_name
@@ -306,6 +308,39 @@ def hue_api_groups_0(token):
     return flask.abort(500)
 
 #
+# Return the full configuration
+#
+@app.route('/api/<token>', strict_slashes=False, methods = ['GET'])
+def hue_api_full_config(token):
+    json_config = {
+        "name": "HA-Echo",
+		"mac": "00:00:47:11:bb:ee",
+		"dhcp": True,
+		"ipaddress": LISTEN_IP,
+		"netmask": "255.255.255.0",
+		"gateway": "0.0.0.0",
+		"proxyaddress": "",
+		"proxyport": 0,
+		"swversion": "01003372",
+		"swupdate": {
+			"updatestate": 0,
+			"url": "",
+			"text": "",
+			"notify": False
+		},
+		"linkbutton": False,
+		"portalservices": False
+		}
+
+    json_lights = {}
+    for id_num in ha.entities.keys():
+        json_lights[id_num] = {'state': {'on': ha.entities[id_num]['cached_on'], 'bri': ha.entities[id_num]['cached_bri'], 'hue':0, 'sat':0, 'effect': 'none', 'ct': 0, 'alert': 'none', 'reachable':True}, 'type': 'Dimmable light', 'name': ha.entities[id_num]['name'], 'modelid': 'LWB004', 'manufacturername': 'Philips', 'uniqueid': id_num, 'swversion': '66012040'}
+
+    json_response = { 'lights': json_lights, 'config':  json_config}
+
+    return flask.Response(json.dumps(json_response), mimetype='application/json')
+
+#
 # Assign a dummy username to Echo if it asks for one
 #
 @app.route('/api', strict_slashes=False, methods = ['POST'])
@@ -316,6 +351,12 @@ def hue_api_create_user():
         return flask.abort(500)
 
     print("Echo asked to be assigned a username")
+    return flask.Response(json.dumps([{'success': {'username': '12345678901234567890'}}]), mimetype='application/json')
+
+# This is sometimes used by Sleep Cycle
+@app.route('/api/(null)', strict_slashes=False, methods = ['GET'])
+def hue_api_create_user_null():
+    print("Echo asked to be assigned a username from (null) request")
     return flask.Response(json.dumps([{'success': {'username': '12345678901234567890'}}]), mimetype='application/json')
 
 #
